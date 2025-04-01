@@ -53,7 +53,7 @@ bool isValid(string str) {
 int main() {
     string input;
        
-    cout << "\nEnter a string to check: ";
+    cout << "\nEnter a string: ";
     getline(cin, input);
     
     if (isValid(input)) {

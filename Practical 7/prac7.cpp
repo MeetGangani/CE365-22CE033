@@ -1,154 +1,127 @@
 #include <iostream>
-#include <set>
 #include <map>
-#include <string>
+#include <set>
+#include <vector>
+
 using namespace std;
 
-// Maps to store FIRST and FOLLOW sets
-map<char, set<char>> first;
-map<char, set<char>> follow;
+map<char, set<char>> firstSets, followSets;
+map<char, vector<string>> productions;
+char startSymbol;
 
-// Function to compute FIRST sets
-void computeFirst() {
-    bool changed;
-    
-    // Initialize FIRST sets for terminals
-    first['a'].insert('a');
-    first['b'].insert('b');
-    first['c'].insert('c');
-    first['('].insert('(');
-    first[')'].insert(')');
-    
-    // Add epsilon ('e') to A and B's FIRST sets
-    first['A'].insert('e');  // 'e' represents epsilon
-    first['B'].insert('e');  // 'e' represents epsilon
-    
-    do {
-        changed = false;
-        
-        // S → A B C | D
-        for (char x : first['A']) {
-            if (x != 'e' && first['S'].insert(x).second) changed = true;
-        }
-        if (first['A'].count('e')) {
-            for (char x : first['B']) {
-                if (x != 'e' && first['S'].insert(x).second) changed = true;
+// Compute FIRST set
+void computeFirst(char symbol) {
+    if (!isupper(symbol)) {  // If terminal, return (ignored in output)
+        firstSets[symbol].insert(symbol);
+        return;
+    }
+
+    for (string rule : productions[symbol]) {
+        bool containsNull = true;
+
+        for (char ch : rule) {
+            computeFirst(ch); // Recursively compute FIRST
+
+            // Add all non-null FIRST elements of ch to FIRST(symbol)
+            for (char firstVal : firstSets[ch]) {
+                if (firstVal != '#')
+                    firstSets[symbol].insert(firstVal);
             }
-            if (first['B'].count('e')) {
-                for (char x : first['C']) {
-                    if (first['S'].insert(x).second) changed = true;
+
+            // Stop if null ('#') is not in FIRST(ch)
+            if (firstSets[ch].count('#') == 0) {
+                containsNull = false;
+                break;
+            }
+        }
+
+        // If all symbols in rule can be null, add null ('#') to FIRST(symbol)
+        if (containsNull) {
+            firstSets[symbol].insert('#');
+        }
+    }
+}
+
+// Compute FOLLOW set
+void computeFollow(char symbol) {
+    if (symbol == startSymbol)
+        followSets[symbol].insert('$'); // Start symbol gets $
+
+    for (auto &prod : productions) {
+        char lhs = prod.first;
+
+        for (string rule : prod.second) {
+            for (size_t i = 0; i < rule.size(); i++) {
+                if (rule[i] == symbol) {
+                    bool isLast = (i == rule.size() - 1);
+
+                    if (!isLast) { // If not last symbol
+                        char nextSymbol = rule[i + 1];
+
+                        // Add FIRST(nextSymbol) to FOLLOW(symbol), excluding null ('#')
+                        for (char firstVal : firstSets[nextSymbol]) {
+                            if (firstVal != '#')
+                                followSets[symbol].insert(firstVal);
+                        }
+
+                        // If FIRST(nextSymbol) contains null, add FOLLOW(LHS)
+                        if (firstSets[nextSymbol].count('#') || isLast) {
+                            computeFollow(lhs);
+                            for (char followVal : followSets[lhs]) {
+                                followSets[symbol].insert(followVal);
+                            }
+                        }
+                    } else { // If last symbol, inherit FOLLOW(LHS)
+                        computeFollow(lhs);
+                        for (char followVal : followSets[lhs]) {
+                            followSets[symbol].insert(followVal);
+                        }
+                    }
                 }
             }
         }
-        for (char x : first['D']) {
-            if (first['S'].insert(x).second) changed = true;
-        }
-        
-        // C → ( S ) | c
-        first['C'].insert('(');
-        first['C'].insert('c');
-        
-        // D → A C
-        for (char x : first['A']) {
-            if (x != 'e' && first['D'].insert(x).second) changed = true;
-        }
-        if (first['A'].count('e')) {
-            for (char x : first['C']) {
-                if (first['D'].insert(x).second) changed = true;
-            }
-        }
-        
-    } while (changed);
+    }
 }
 
-// Function to compute FOLLOW sets
-void computeFollow() {
-    bool changed;
-    
-    // Add $ to FOLLOW(S)
-    follow['S'].insert('$');
-    
-    do {
-        changed = false;
-        
-        // S → A B C | D
-        for (char x : follow['S']) {
-            if (follow['C'].insert(x).second) changed = true;
-        }
-        if (first['C'].count('e')) {
-            for (char x : follow['S']) {
-                if (follow['B'].insert(x).second) changed = true;
-            }
-        }
-        for (char x : first['B']) {
-            if (x != 'e' && follow['A'].insert(x).second) changed = true;
-        }
-        for (char x : first['C']) {
-            if (x != 'e' && follow['B'].insert(x).second) changed = true;
-        }
-        
-        // C → ( S )
-        follow['S'].insert(')');
-        
-        // D → A C
-        for (char x : follow['D']) {
-            if (follow['C'].insert(x).second) changed = true;
-        }
-        for (char x : first['C']) {
-            if (x != 'e' && follow['A'].insert(x).second) changed = true;
-        }
-        if (first['C'].count('e')) {
-            for (char x : follow['D']) {
-                if (follow['A'].insert(x).second) changed = true;
-            }
-        }
-        
-    } while (changed);
-}
+// Display FIRST and FOLLOW sets (excluding terminals & # entry)
+void displaySets(string setName, map<char, set<char>> &sets, bool excludeTerminals) {
+    cout << setName << " sets:\n";
+    for (auto &entry : sets) {
+        if (excludeTerminals && !isupper(entry.first)) continue; // Skip terminals
 
-// Function to print sets in the required format
-void printSet(char nonTerminal, const set<char>& s, bool isFirst = true) {
-    if (isFirst) {
-        cout << "First(" << nonTerminal << ") = {";
-    } else {
-        cout << "Follow(" << nonTerminal << ") = {";
+        cout << entry.first << " = { ";
+        for (char ch : entry.second) {
+            cout << ch << " ";
+        }
+        cout << "}\n";
     }
-    
-    bool first = true;
-    for (char c : s) {
-        if (c == 'e') continue;  // Skip epsilon for First sets as per output format
-        if (!first) cout << ", ";
-        cout << c;
-        first = false;
-    }
-    cout << "}" << endl;
 }
 
 int main() {
-    cout << "Grammar:" << endl;
-    cout << "S → A B C | D" << endl;
-    cout << "A → a | ε" << endl;
-    cout << "B → b | ε" << endl;
-    cout << "C → ( S ) | c" << endl;
-    cout << "D → A C" << endl;
-    cout << endl;
-    
-    computeFirst();
-    computeFollow();
-    
-    // Print FIRST sets
-    printSet('S', first['S']);
-    printSet('A', first['A']);
-    printSet('B', first['B']);
-    printSet('C', first['C']);
-    printSet('D', first['D']);
-    
-    // Print FOLLOW sets
-    printSet('S', follow['S'], false);
-    printSet('A', follow['A'], false);
-    printSet('B', follow['B'], false);
-    printSet('C', follow['C'], false);
-    printSet('D', follow['D'], false);
-    
+    // Define grammar productions
+    productions = {
+        {'S', {"ABC", "D"}},
+        {'A', {"a", "#"}},
+        {'B', {"b", "#"}},
+        {'C', {"(S)", "c"}},
+        {'D', {"AC"}}
+    };
+
+    startSymbol = 'S'; // Define start symbol
+
+    // Compute FIRST sets
+    for (auto &prod : productions) {
+        computeFirst(prod.first);
+    }
+
+    // Compute FOLLOW sets
+    for (auto &prod : productions) {
+        computeFollow(prod.first);
+    }
+
+    // Display results (excluding terminals in FIRST set)
+    displaySets("First", firstSets, true);
+    displaySets("Follow", followSets, false);
+
     return 0;
 }
